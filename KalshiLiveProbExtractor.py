@@ -1,5 +1,6 @@
 import requests
 import time
+import json
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -58,17 +59,91 @@ def get_kalshi_buy_percentages(ticker):
         print(f"Error parsing orderbook data: {e}")
         return None, None
 
+
+# --- Polymarket -------------------------------------------------------------
+
+GAMMA_API = "https://gamma-api.polymarket.com"
+CLOB_API = "https://clob.polymarket.com"
+
+
+def get_polymarket_tokens(slug):
+    """Resolve a market slug to its outcome -> CLOB token id mapping.
+
+    This only needs to be fetched once; the token ids never change for a
+    given market.
+    """
+    response = session.get(f"{GAMMA_API}/markets", params={"slug": slug}, timeout=5)
+    response.raise_for_status()
+    markets = response.json()
+    if not markets:
+        raise ValueError(f"No Polymarket market found for slug '{slug}'")
+
+    market = markets[0]
+    # Gamma returns these as JSON-encoded strings, aligned by index, e.g.
+    # outcomes='["Yes", "No"]'  clobTokenIds='["123...", "456..."]'
+    outcomes = json.loads(market["outcomes"])
+    token_ids = json.loads(market["clobTokenIds"])
+    return dict(zip(outcomes, token_ids))
+
+
+def get_polymarket_best_buy(token_id):
+    """Best price to BUY a token = the lowest ask in its order book.
+
+    Returns the price as a percentage (e.g. 0.92 -> 92.0), or None if the
+    book has no asks.
+    """
+    response = session.get(f"{CLOB_API}/book", params={"token_id": token_id}, timeout=5)
+    response.raise_for_status()
+    asks = response.json().get("asks", [])
+    if not asks:
+        return None
+    # Use min() so we don't depend on the book's sort order.
+    best_ask = min(float(level["price"]) for level in asks)
+    return round(best_ask * 100, 2)
+
+
+def get_polymarket_buy_percentages(tokens):
+    try:
+        yes_percent = get_polymarket_best_buy(tokens["Yes"]) if "Yes" in tokens else None
+        no_percent = get_polymarket_best_buy(tokens["No"]) if "No" in tokens else None
+        return yes_percent, no_percent
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching Polymarket data: {e}")
+        return None, None
+    except (KeyError, ValueError) as e:
+        print(f"Error parsing Polymarket data: {e}")
+        return None, None
+
+
 # Replace with the ticker of your target market
-market_ticker = "KXCS2GAME-26JUN251200UNOKEYD-UNO" 
+market_ticker = "KXVALORANTGAME-26JUN251330FKSPL-FKS"
+
+# Replace with the slug of the matching Polymarket market (leave "" to skip).
+# e.g. "will-eth-be-above-3000-on-jun-27"
+polymarket_slug = "val-pl-fks1-2026-06-25"
+
+# Resolve the Polymarket token ids once, up front.
+poly_tokens = None
+if polymarket_slug:
+    try:
+        poly_tokens = get_polymarket_tokens(polymarket_slug)
+    except (requests.exceptions.RequestException, ValueError, KeyError) as e:
+        print(f"Could not load Polymarket market '{polymarket_slug}': {e}")
 
 print(f"Tracking buy percentages for {market_ticker}...\n")
 
 # 1-second interval loop
 while True:
-    yes_pct, no_pct = get_kalshi_buy_percentages(market_ticker)
-    
-    if yes_pct is not None:
-        print(f"YES Buy Percentage: {yes_pct}% | NO Buy Percentage: {no_pct}%")
-    
+    k_yes, k_no = get_kalshi_buy_percentages(market_ticker)
+
+    if k_yes is not None:
+        line = f"Kalshi  -> YES: {k_yes}% | NO: {k_no}%"
+
+        if poly_tokens:
+            p_yes, p_no = get_polymarket_buy_percentages(poly_tokens)
+            line += f"   ||   Poly -> YES: {p_yes}% | NO: {p_no}%"
+
+        print(line)
+
     # Pause for 1 second before querying again
     time.sleep(1)
