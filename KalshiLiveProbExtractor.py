@@ -121,11 +121,11 @@ def get_polymarket_buy_percentages(token_ids):
 
 
 # Replace with the ticker of your target market
-market_ticker = "KXVALORANTGAME-26JUN251330FKSPL-PL"
+market_ticker = "KXVALORANTGAME-26JUN260100OSGARE-OSG"
 
 # Replace with the slug of the matching Polymarket market (leave "" to skip).
 # e.g. "will-eth-be-above-3000-on-jun-27"
-polymarket_slug = "val-pl-fks1-2026-06-25"
+polymarket_slug = "val-art-osg-2026-06-26"
 
 # Resolve the Polymarket outcomes + token ids once, up front.
 poly_token_ids = None
